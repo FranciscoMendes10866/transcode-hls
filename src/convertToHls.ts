@@ -18,7 +18,7 @@ export async function handleHlsSegmentsUpload(
     inputStream.end(videoBuffer);
 
     const segmentStream = new PassThrough();
-    let segmentIdx = 0;
+    let segmentIdx = -1;
 
     segmentStream.on("data", async (chunk: Buffer) => {
       segmentIdx += 1;
