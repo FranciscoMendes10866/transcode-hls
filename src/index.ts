@@ -4,7 +4,11 @@ import multer from "multer";
 import { VIDEO_FORMATS, RESOLUTIONS } from "./constants";
 import { bucket, BucketUtils } from "./bucket";
 import { convertToMp4 } from "./convertToMp4";
-import { convertToHls, generateMasterManifest } from "./convertToHls";
+import {
+  convertToHls,
+  generateHlsIndex,
+  generateMasterManifest,
+} from "./convertToHls";
 
 const resolutionKeys = Object.keys(RESOLUTIONS) as Array<
   keyof typeof RESOLUTIONS
@@ -41,7 +45,7 @@ app.post(
     );
 
     for await (const resolution of resolutionKeys) {
-      const { indexFile, segments } = await convertToHls(
+      const segments = await convertToHls(
         convertedBuffer,
         resolution as keyof typeof RESOLUTIONS,
       );
@@ -49,7 +53,7 @@ app.post(
       await Promise.all([
         bucket.write(
           BucketUtils.getResolutionPlaylistPath(fileName, resolution),
-          indexFile,
+          generateHlsIndex(segments.length),
           { type: "application/vnd.apple.mpegurl" },
         ),
         ...segments.map((segment, segmentIdx) =>
@@ -66,11 +70,9 @@ app.post(
       ]);
     }
 
-    const masterManifest = generateMasterManifest(resolutionKeys);
-
     await bucket.write(
       BucketUtils.getManifestPath(fileName),
-      Buffer.from(masterManifest),
+      generateMasterManifest(resolutionKeys),
       { type: "application/vnd.apple.mpegurl" },
     );
 
