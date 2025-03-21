@@ -1,17 +1,40 @@
 import { PassThrough } from "stream";
 import ffmpeg from "fluent-ffmpeg";
 
-export async function convertToMp4(inputBuffer: Buffer): Promise<Buffer> {
+import { bucket, BucketUtils } from "./bucket";
+
+export async function handleOriginalVideoUpload(
+  inputBuffer: Buffer,
+  fileName: string,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const s3File = bucket.file(BucketUtils.getOriginalVideoPath(fileName), {
+      type: "video/mp4",
+    });
+
+    const writer = s3File.writer({
+      retry: 1,
+      queueSize: 4,
+      partSize: 5 * 1024 * 1024,
+    });
+
     const inputStream = new PassThrough();
     inputStream.end(inputBuffer);
 
     const outputStream = new PassThrough();
     const chunks: Array<Buffer> = [];
 
-    outputStream.on("data", (chunk) => chunks.push(chunk));
+    outputStream.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+      writer.write(chunk);
+    });
+
     outputStream.on("error", reject);
-    outputStream.on("end", () => resolve(Buffer.concat(chunks)));
+
+    outputStream.on("end", async () => {
+      await writer.end();
+      resolve(Buffer.concat(chunks));
+    });
 
     ffmpeg(inputStream)
       .outputFormat("mp4")

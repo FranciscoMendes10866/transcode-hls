@@ -3,9 +3,9 @@ import multer from "multer";
 
 import { VIDEO_FORMATS, RESOLUTIONS } from "./constants";
 import { bucket, BucketUtils } from "./bucket";
-import { convertToMp4 } from "./convertToMp4";
+import { handleOriginalVideoUpload } from "./convertToMp4";
 import {
-  convertToHls,
+  handleHlsSegmentsUpload,
   generateHlsIndex,
   generateMasterManifest,
 } from "./convertToHls";
@@ -37,37 +37,23 @@ app.post(
         .json({ success: false, message: `Invalid file type: ${fileType}.` });
     }
 
-    const convertedBuffer = await convertToMp4(req.file.buffer);
-    await bucket.write(
-      BucketUtils.getOriginalVideoPath(fileName),
-      convertedBuffer,
-      { type: "video/mp4" },
+    const originalVideoBuffer = await handleOriginalVideoUpload(
+      req.file.buffer,
+      fileName,
     );
 
     for await (const resolution of resolutionKeys) {
-      const segments = await convertToHls(
-        convertedBuffer,
+      const segments = await handleHlsSegmentsUpload(
+        originalVideoBuffer,
+        fileName,
         resolution as keyof typeof RESOLUTIONS,
       );
 
-      await Promise.all([
-        bucket.write(
-          BucketUtils.getResolutionPlaylistPath(fileName, resolution),
-          generateHlsIndex(segments.length),
-          { type: "application/vnd.apple.mpegurl" },
-        ),
-        ...segments.map((segment, segmentIdx) =>
-          bucket.write(
-            BucketUtils.getResolutionSegmentPath(
-              fileName,
-              resolution,
-              segmentIdx,
-            ),
-            segment,
-            { type: "video/mp2t" },
-          ),
-        ),
-      ]);
+      await bucket.write(
+        BucketUtils.getResolutionPlaylistPath(fileName, resolution),
+        generateHlsIndex(segments),
+        { type: "application/vnd.apple.mpegurl" },
+      );
     }
 
     await bucket.write(

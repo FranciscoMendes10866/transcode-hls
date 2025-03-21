@@ -2,25 +2,35 @@ import { PassThrough } from "stream";
 import ffmpeg from "fluent-ffmpeg";
 
 import { RESOLUTIONS } from "./constants";
+import { bucket, BucketUtils } from "./bucket";
 
 type VideoResolution = keyof typeof RESOLUTIONS;
 
-export async function convertToHls(
+export async function handleHlsSegmentsUpload(
   videoBuffer: Buffer,
+  fileName: string,
   resolution: VideoResolution,
-): Promise<Array<Buffer>> {
-  const { width, height, bitrate, audioBitrate } = RESOLUTIONS[resolution];
-
+): Promise<number> {
   return new Promise((resolve, reject) => {
+    const { width, height, bitrate, audioBitrate } = RESOLUTIONS[resolution];
+
     const inputStream = new PassThrough();
     inputStream.end(videoBuffer);
 
-    const segments: Array<Buffer> = [];
     const segmentStream = new PassThrough();
+    let segmentIdx = 0;
 
-    segmentStream.on("data", (chunk: Buffer) => {
-      segments.push(chunk);
+    segmentStream.on("data", async (chunk: Buffer) => {
+      segmentIdx += 1;
+
+      await bucket.write(
+        BucketUtils.getResolutionSegmentPath(fileName, resolution, segmentIdx),
+        chunk,
+        { type: "video/mp2t" },
+      );
     });
+
+    segmentStream.on("end", () => resolve(segmentIdx));
 
     ffmpeg(inputStream)
       .outputFormat("mpegts")
@@ -42,7 +52,6 @@ export async function convertToHls(
           new Error(`FFmpeg segment stream failed: ${stderr || err.message}`),
         );
       })
-      .on("end", () => resolve(segments))
       .pipe(segmentStream, { end: true });
   });
 }
